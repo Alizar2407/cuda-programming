@@ -1,4 +1,5 @@
 import time
+import math
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -9,7 +10,7 @@ from pycuda.compiler import SourceModule
 
 # ----------------------------------------------------------------
 # CUDA C function to multiply matrices of size NxN
-mod = SourceModule(
+module = SourceModule(
     """
     __global__ void multiply_matrices_cuda(float *C, float *A, float *B, int N)
     {
@@ -46,18 +47,20 @@ def calculate_time_decorator(function):
 def multiply_matrices_gpu(matrix1: np.ndarray, matrix2: np.ndarray) -> np.ndarray:
     # Check if matrices cannot be multiplied
     assert matrix1.shape[1] == matrix2.shape[0]
+    N = matrix1.shape[1]
 
-    # Initialize the output matrix C with zeros
+    # Initialize the output matrix with zeros
     result_matrix = np.zeros((matrix1.shape[0], matrix2.shape[1]), dtype=np.float32)
 
     # Set block and grid sizes
-    block_size = (16, 16, 1)
-    grid_size = (1, 1)
+    k = 32
+    block_size = (k, k, 1)
+    grid_size = (math.ceil(N / k), math.ceil(N / k))
 
     # Get CUDA function
-    multiply_matrices_cuda = mod.get_function("multiply_matrices_cuda")
+    multiply_matrices_cuda = module.get_function("multiply_matrices_cuda")
 
-    # Apply CUDA function to the arrays
+    # Apply CUDA function to the matrices
     multiply_matrices_cuda(
         drv.Out(result_matrix),
         drv.In(matrix1),
@@ -101,45 +104,45 @@ def multiply_matrices_iterative(matrix1: np.ndarray, matrix2: np.ndarray) -> np.
 
 
 # ----------------------------------------------------------------
-matrix_sizes = [100, 200, 300, 500, 800, 1000, 1200, 1500, 1800, 2000]
+if __name__ == "__main__":
+    matrix_sizes = [100, 200, 300, 500, 800, 1000, 1200, 1500, 2000]
 
-calculation_time_gpu = []
-calculation_time_numpy = []
-calculation_time_iterative = []
+    calculation_time_gpu = []
+    calculation_time_numpy = []
+    calculation_time_iterative = []
 
-# Multiply matrices of different sizes
-for index, N in enumerate(matrix_sizes):
-    print("----------------------------------------------------------------")
-    print(f"Processing matrices of size {N}...")
+    # Multiply matrices of different sizes
+    for index, N in enumerate(matrix_sizes):
+        print("----------------------------------------------------------------")
+        print(f"Processing matrices of size {N}...")
 
-    # Create random input matrices
-    matrix1 = np.random.randn(N, N).astype(np.float32)
-    matrix2 = np.random.randn(N, N).astype(np.float32)
+        # Create random matrices of size NxN
+        matrix1 = np.random.randn(N, N).astype(np.float32)
+        matrix2 = np.random.randn(N, N).astype(np.float32)
 
-    # Calculate result wit GPU
-    result_gpu, time_gpu = multiply_matrices_gpu(matrix1, matrix2)
-    calculation_time_gpu.append(time_gpu)
-    print(f"GPU: {time_gpu:0.3f} seconds")
+        # Calculate result with GPU
+        result_gpu, time_gpu = multiply_matrices_gpu(matrix1, matrix2)
+        calculation_time_gpu.append(time_gpu)
+        print(f"GPU: {time_gpu:0.3f} seconds")
 
-    # Calculate result with numpy
-    result_numpy, time_numpy = multiply_matrices_gpu(matrix1, matrix2)
-    calculation_time_numpy.append(time_numpy)
-    print(f"Numpy: {time_numpy:0.3f} seconds")
+        # Calculate result with numpy
+        result_numpy, time_numpy = multiply_matrices_numpy(matrix1, matrix2)
+        calculation_time_numpy.append(time_numpy)
+        print(f"Numpy: {time_numpy:0.3f} seconds")
 
-    # # Calculate result iteratively
-    # result_iterative, time_iterative = multiply_matrices_iterative(matrix1, matrix2)
-    # calculation_time_iterative.append(time_iterative)
-    # print(f"Iterative: {time_iterative:0.3f} seconds")
+        # # Calculate result iteratively
+        # result_iterative, time_iterative = multiply_matrices_iterative(matrix1, matrix2)
+        # calculation_time_iterative.append(time_iterative)
+        # print(f"Iterative: {time_iterative:0.3f} seconds")
 
-    print()
+        print()
 
+    plt.plot(matrix_sizes, calculation_time_gpu)
+    plt.plot(matrix_sizes, calculation_time_numpy)
+    # plt.plot(matrix_sizes, calculation_time_iterative)
 
-plt.plot(matrix_sizes, calculation_time_gpu)
-plt.plot(matrix_sizes, calculation_time_numpy)
-# plt.plot(matrix_sizes, calculation_time_iterative)
+    plt.xlabel("The size of matrices (N)")
+    plt.ylabel("Time of calculation, seconds")
+    plt.legend(["GPU", "Numpy", "Iterative"])
 
-plt.xlabel("The size of matrices (N)")
-plt.ylabel("Time of calculation, seconds")
-plt.legend(["GPU", "Numpy", "Iterative"])
-
-plt.show()
+    plt.show()

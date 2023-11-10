@@ -23,6 +23,9 @@ def calculate_time_decorator(function):
 cuda_kernel_code = """
 #include <pycuda-complex.hpp>
 
+// Declaring 2D texture memory
+texture<unsigned char, 2, cudaReadModeElementType> tex;
+
 __device__ const float M_PI = 3.14159265358979323846;
 
 __device__ int get_f_value(int ai){
@@ -55,13 +58,15 @@ __device__ double get_r_value(int ai, double a0, double sigma){
 
 
 // Calculates the new value of pixel intensity
-__device__  double get_h_value(unsigned char* original_image, int x,  int y, int width, int height, int filter_size, int sigma){
+__device__  double get_h_value(unsigned char* original_image, int mainPixelX,  int mainPixelY,
+    int width, int height, int filter_size, int sigma){
+    
     // Get kernel borders
     int delta = filter_size / 2;
-    int x_start = x - delta;
-    int x_end = x + delta;
-    int y_start = y - delta;
-    int y_end = y + delta;
+    int x_start = mainPixelX - delta;
+    int x_end = mainPixelX + delta;
+    int y_start = mainPixelY - delta;
+    int y_end = mainPixelY + delta;
 
     // Normalizing constant to prevent intensity increase
     double k = 0;
@@ -70,14 +75,18 @@ __device__  double get_h_value(unsigned char* original_image, int x,  int y, int
     double summ = 0;
 
     // Iterate through every pixel of the original image
-    int main_pixel_index = y * width + x;
-    int main_pixel_brightness = original_image[main_pixel_index];
+    int main_pixel_index = mainPixelY * width + mainPixelX;
+
+    //int main_pixel_brightness = original_image[main_pixel_index];
+    int main_pixel_brightness = tex2D(tex, mainPixelX, mainPixelY);
+
     for (int y = y_start; y <= y_end; ++y) {
         for (int x = x_start; x <= x_end; ++x) {
             int current_pixel_brightness;
             if (0 <=x && x < width && 0 <= y && y < height) {
                 int index = y * width + x;
                 current_pixel_brightness = original_image[index];
+                //current_pixel_brightness = tex2D(tex, x, y);
             }
             else {
                 current_pixel_brightness = 0;
@@ -92,10 +101,13 @@ __device__  double get_h_value(unsigned char* original_image, int x,  int y, int
         }
     }
 
-    if (k == 0)
-        return original_image[main_pixel_index];
-    else
+    if (k == 0) {
+        //return original_image[main_pixel_index];
+        return tex2D(tex, mainPixelX, mainPixelY);
+    }
+    else {
         return summ / k;
+    }
 }
 
 
@@ -128,6 +140,10 @@ def get_blurred_image(original_image, filter_size=7, sigma=10):
     # Compile the CUDA kernel code
     module = SourceModule(cuda_kernel_code)
     gaussian_filter_kernel = module.get_function("gaussian_filter")
+
+    # Load input image data to the texture memory
+    texref = module.get_texref("tex")
+    cuda.matrix_to_texref(original_image.astype(np.uint8), texref, order="C")
 
     # Define block and grid sizes
     block_size = (32, 32)
